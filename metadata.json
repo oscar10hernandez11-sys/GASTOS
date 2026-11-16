@@ -1,0 +1,6 @@
+{
+  "name": "Kakebo - Control de Finanzas Personales & Facturas OCR",
+  "description": "Plataforma multiusuario para control de gastos, facturas con escaneo OCR local, comparador de precios de productos y gestión de deudas con Supabase y Netlify.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
