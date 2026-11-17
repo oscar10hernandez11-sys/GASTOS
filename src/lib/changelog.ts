@@ -1,8 +1,16 @@
 import { AppChangelogEntry } from '../types/database';
 
-export const CURRENT_APP_VERSION = 'v1.13';
+export const CURRENT_APP_VERSION = 'v1.14';
 
 export const APP_CHANGELOG_HISTORY: AppChangelogEntry[] = [
+  {
+    version: 'v1.14',
+    fecha: '2026-11-16',
+    cambios: [
+      'Asignación y edición de categoría directamente en Productos y Precios: cada fila del catálogo y el modal de histórico de precios permiten asignar o cambiar la categoría del producto con guardado inmediato.',
+      'Nuevo filtro "Sin asignar" en Productos y Precios para localizar rápidamente los productos pendientes por categorizar.'
+    ]
+  },
   {
     version: 'v1.13',
     fecha: '2026-11-16',

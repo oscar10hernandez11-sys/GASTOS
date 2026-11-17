@@ -11,6 +11,7 @@ import {
   X,
   History,
   ShoppingBag,
+  CheckCircle2,
 } from 'lucide-react';
 import {
   ResponsiveContainer,
@@ -21,7 +22,12 @@ import {
   Tooltip,
   CartesianGrid,
 } from 'recharts';
-import { getProductos, getCategorias, getProductPriceHistory } from '../../services/dataService';
+import {
+  getProductos,
+  getCategorias,
+  getProductPriceHistory,
+  updateProductoCategoria,
+} from '../../services/dataService';
 import { Producto, Categoria } from '../../types/database';
 import { formatCOP, formatDateCO, formatPercent } from '../../lib/formatters';
 import { useTheme } from '../../lib/theme';
@@ -40,6 +46,8 @@ export const ProductosView: React.FC = () => {
     Array<{ fecha: string; precio_unitario: number; proveedor: string; cantidad: number }>
   >([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [updatingProdId, setUpdatingProdId] = useState<string | null>(null);
+  const [savedNotice, setSavedNotice] = useState<string | null>(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -59,6 +67,7 @@ export const ProductosView: React.FC = () => {
   }, []);
 
   const handleOpenProductHistory = async (prod: Producto) => {
+    setSavedNotice(null);
     setSelectedProduct(prod);
     setHistoryLoading(true);
     try {
@@ -71,9 +80,35 @@ export const ProductosView: React.FC = () => {
     }
   };
 
+  const handleChangeProductoCategoria = async (productoId: string, newCategoriaId: string) => {
+    const catIdOrNull = newCategoriaId || null;
+    setUpdatingProdId(productoId);
+    setSavedNotice(null);
+    try {
+      await updateProductoCategoria(productoId, catIdOrNull);
+      const updatedProds = await getProductos();
+      setProductos(updatedProds);
+      if (selectedProduct && selectedProduct.id === productoId) {
+        const refreshed = updatedProds.find((p) => p.id === productoId) || null;
+        setSelectedProduct(refreshed);
+        setSavedNotice('Categoría del producto actualizada.');
+        setTimeout(() => setSavedNotice(null), 2500);
+      }
+    } catch (err) {
+      console.error('Error actualizando categoría del producto:', err);
+    } finally {
+      setUpdatingProdId(null);
+    }
+  };
+
   const filteredProducts = productos.filter((p) => {
     const matchesSearch = p.nombre.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCat = !filterCategoria || p.categoria_id === filterCategoria;
+    const matchesCat =
+      !filterCategoria
+        ? true
+        : filterCategoria === '__unassigned__'
+        ? !p.categoria_id
+        : p.categoria_id === filterCategoria;
     return matchesSearch && matchesCat;
   });
 
@@ -99,6 +134,7 @@ export const ProductosView: React.FC = () => {
             className="text-xs bg-white dark:bg-[var(--card-bg)] border border-slate-200 dark:border-[var(--card-border)] text-slate-700 dark:text-slate-200 rounded-md px-3 py-2 focus:outline-none focus:ring-1 focus:ring-[var(--accent-fg)]"
           >
             <option value="">Todas las categorías</option>
+            <option value="__unassigned__">Sin asignar</option>
             {categorias.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.nombre}
@@ -163,24 +199,33 @@ export const ProductosView: React.FC = () => {
                         </span>
                       </td>
 
-                      <td className="py-3.5 px-4">
-                        {prod.categoria ? (
+                      <td
+                        className="py-3.5 px-4"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="inline-flex items-center gap-1.5">
                           <span
-                            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium"
+                            className="w-2 h-2 rounded-full shrink-0"
                             style={{
-                              backgroundColor: `${prod.categoria.color}20`,
-                              color: prod.categoria.color,
+                              backgroundColor: prod.categoria?.color || '#94A3B8',
                             }}
+                          />
+                          <select
+                            aria-label={`Categoría de ${prod.nombre}`}
+                            value={prod.categoria_id || ''}
+                            disabled={updatingProdId === prod.id}
+                            onChange={(e) => handleChangeProductoCategoria(prod.id, e.target.value)}
+                            className="text-[11px] font-medium px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-[var(--accent-fg)] cursor-pointer disabled:opacity-50 max-w-[185px]"
+                            title="Asignar o cambiar categoría del producto"
                           >
-                            <span
-                              className="w-1.5 h-1.5 rounded-full"
-                              style={{ backgroundColor: prod.categoria.color }}
-                            />
-                            {prod.categoria.nombre}
-                          </span>
-                        ) : (
-                          <span className="text-slate-400 text-[11px]">Sin asignar</span>
-                        )}
+                            <option value="">Sin asignar</option>
+                            {categorias.map((c) => (
+                              <option key={c.id} value={c.id}>
+                                {c.nombre}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
                       </td>
 
                       <td className="py-3.5 px-4 text-right font-mono font-semibold text-slate-900 dark:text-slate-100">
@@ -272,6 +317,49 @@ export const ProductosView: React.FC = () => {
 
             {/* Content */}
             <div className="p-6 space-y-6">
+              {/* Asignar categoría del producto */}
+              <div className="p-3.5 rounded-lg border border-slate-200 dark:border-[var(--card-border)] bg-slate-50 dark:bg-[var(--card-muted)] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                    Categoría del Producto
+                  </label>
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Usada en la distribución por categoría del Dashboard
+                  </p>
+                </div>
+                <div className="flex flex-col items-stretch sm:items-end gap-1">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="w-2.5 h-2.5 rounded-full shrink-0"
+                      style={{
+                        backgroundColor: selectedProduct.categoria?.color || '#94A3B8',
+                      }}
+                    />
+                    <select
+                      value={selectedProduct.categoria_id || ''}
+                      disabled={updatingProdId === selectedProduct.id}
+                      onChange={(e) =>
+                        handleChangeProductoCategoria(selectedProduct.id, e.target.value)
+                      }
+                      className="text-xs px-3 py-1.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md focus:outline-none focus:ring-1 focus:ring-[var(--accent-fg)] text-slate-900 dark:text-slate-100 disabled:opacity-50"
+                    >
+                      <option value="">Sin asignar</option>
+                      {categorias.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.nombre}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {savedNotice && (
+                    <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3" />
+                      <span>{savedNotice}</span>
+                    </span>
+                  )}
+                </div>
+              </div>
+
               {/* Summary KPIs */}
               <div className="grid grid-cols-3 gap-3">
                 <div className="bg-slate-50 dark:bg-[var(--card-muted)] p-3 rounded-lg border border-slate-200 dark:border-[var(--card-border)] text-center">
