@@ -21,6 +21,9 @@ import {
   getCategorias,
   getProductos,
   createFacturaWithItems,
+  updateFacturaCategoria,
+  updateProductoCategoria,
+  assignCategoryToFacturaAndItems,
   deleteFactura,
 } from '../../services/dataService';
 import { Factura, Categoria, Producto } from '../../types/database';
@@ -68,6 +71,9 @@ export const FacturasView: React.FC = () => {
 
   // Modal para ver detalle de factura
   const [selectedFactura, setSelectedFactura] = useState<Factura | null>(null);
+  const [updatingCatFacturaId, setUpdatingCatFacturaId] = useState<string | null>(null);
+  const [updatingItemProdId, setUpdatingItemProdId] = useState<string | null>(null);
+  const [categorySavedMsg, setCategorySavedMsg] = useState<string | null>(null);
 
   // Envío del formulario
   const [submitting, setSubmitting] = useState(false);
@@ -290,6 +296,64 @@ export const FacturasView: React.FC = () => {
     }
   };
 
+  // Asignar / actualizar categoría de una factura ya subida
+  const handleChangeFacturaCategoria = async (
+    facturaId: string,
+    newCategoriaId: string,
+    applyAllItems: boolean = false
+  ) => {
+    const catIdOrNull = newCategoriaId || null;
+    setUpdatingCatFacturaId(facturaId);
+    setCategorySavedMsg(null);
+    try {
+      if (applyAllItems) {
+        await assignCategoryToFacturaAndItems(facturaId, catIdOrNull);
+      } else {
+        await updateFacturaCategoria(facturaId, catIdOrNull, true);
+      }
+      const updatedFacs = await getFacturas();
+      setFacturas(updatedFacs);
+      if (selectedFactura && selectedFactura.id === facturaId) {
+        const refreshed = updatedFacs.find((f) => f.id === facturaId) || null;
+        setSelectedFactura(refreshed);
+        setCategorySavedMsg(
+          applyAllItems
+            ? 'Categoría aplicada a la factura y a todos sus ítems.'
+            : 'Categoría de la factura actualizada.'
+        );
+        setTimeout(() => setCategorySavedMsg(null), 2500);
+      }
+    } catch (err) {
+      console.error('Error actualizando categoría de factura:', err);
+    } finally {
+      setUpdatingCatFacturaId(null);
+    }
+  };
+
+  // Asignar / actualizar categoría de un producto/ítem desde el detalle de factura
+  const handleChangeItemProductoCategoria = async (
+    facturaId: string,
+    productoId: string,
+    newCategoriaId: string
+  ) => {
+    const catIdOrNull = newCategoriaId || null;
+    setUpdatingItemProdId(productoId);
+    setCategorySavedMsg(null);
+    try {
+      await updateProductoCategoria(productoId, catIdOrNull);
+      const updatedFacs = await getFacturas();
+      setFacturas(updatedFacs);
+      const refreshed = updatedFacs.find((f) => f.id === facturaId) || null;
+      setSelectedFactura(refreshed);
+      setCategorySavedMsg('Categoría del producto actualizada.');
+      setTimeout(() => setCategorySavedMsg(null), 2500);
+    } catch (err) {
+      console.error('Error actualizando categoría del producto:', err);
+    } finally {
+      setUpdatingItemProdId(null);
+    }
+  };
+
   // Filtrado de lista
   const filteredFacturas = facturas.filter((f) => {
     const matchesSearch =
@@ -398,23 +462,29 @@ export const FacturasView: React.FC = () => {
                       )}
                     </td>
                     <td className="py-3.5 px-4">
-                      {fac.categoria ? (
+                      <div className="inline-flex items-center gap-1.5">
                         <span
-                          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[11px] font-medium"
+                          className="w-2 h-2 rounded-full shrink-0"
                           style={{
-                            backgroundColor: `${fac.categoria.color}20`,
-                            color: fac.categoria.color,
+                            backgroundColor: fac.categoria?.color || '#94A3B8',
                           }}
+                        />
+                        <select
+                          aria-label={`Categoría de factura ${fac.proveedor}`}
+                          value={fac.categoria_id || ''}
+                          disabled={updatingCatFacturaId === fac.id}
+                          onChange={(e) => handleChangeFacturaCategoria(fac.id, e.target.value, false)}
+                          className="text-[11px] font-medium px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-[var(--accent-fg)] cursor-pointer disabled:opacity-50 max-w-[190px]"
+                          title="Asignar o cambiar la categoría de esta factura"
                         >
-                          <span
-                            className="w-1.5 h-1.5 rounded-full"
-                            style={{ backgroundColor: fac.categoria.color }}
-                          />
-                          {fac.categoria.nombre}
-                        </span>
-                      ) : (
-                        <span className="text-slate-400 dark:text-slate-500 text-[11px]">Varios</span>
-                      )}
+                          <option value="">Sin categoría (Varios)</option>
+                          {categorias.map((cat) => (
+                            <option key={cat.id} value={cat.id}>
+                              {cat.nombre}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </td>
                     <td className="py-3.5 px-4 text-slate-500 dark:text-slate-400">
                       <span className="bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 px-2 py-0.5 rounded font-mono text-[11px]">
@@ -427,7 +497,10 @@ export const FacturasView: React.FC = () => {
                     <td className="py-3.5 px-4 text-center">
                       <div className="flex items-center justify-center space-x-1">
                         <button
-                          onClick={() => setSelectedFactura(fac)}
+                          onClick={() => {
+                            setCategorySavedMsg(null);
+                            setSelectedFactura(fac);
+                          }}
                           className="p-1.5 text-slate-400 hover:text-[var(--accent-fg)] hover:bg-slate-100 dark:hover:bg-slate-800 rounded transition-colors"
                           title="Ver detalle de factura"
                         >
@@ -891,6 +964,67 @@ export const FacturasView: React.FC = () => {
             </div>
 
             <div className="p-6 space-y-4 max-h-[60vh] overflow-y-auto">
+              {/* Asignar categoría principal después de subir la factura */}
+              <div className="p-3.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 space-y-2.5">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <label className="block text-[11px] font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                      Categoría Principal de la Factura
+                    </label>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Asigna o cambia la categoría en cualquier momento
+                    </p>
+                  </div>
+                  {selectedFactura.categoria_id && (
+                    <button
+                      type="button"
+                      disabled={updatingCatFacturaId === selectedFactura.id}
+                      onClick={() =>
+                        handleChangeFacturaCategoria(
+                          selectedFactura.id,
+                          selectedFactura.categoria_id || '',
+                          true
+                        )
+                      }
+                      className="text-[11px] px-2.5 py-1 rounded bg-[var(--accent-soft)] text-[var(--accent-fg)] hover:opacity-90 font-medium transition-opacity disabled:opacity-50 self-start sm:self-auto"
+                    >
+                      Aplicar a todos los ítems
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span
+                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                    style={{
+                      backgroundColor: selectedFactura.categoria?.color || '#94A3B8',
+                    }}
+                  />
+                  <select
+                    value={selectedFactura.categoria_id || ''}
+                    disabled={updatingCatFacturaId === selectedFactura.id}
+                    onChange={(e) =>
+                      handleChangeFacturaCategoria(selectedFactura.id, e.target.value, false)
+                    }
+                    className="flex-1 text-xs px-3 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-md focus:outline-none focus:ring-1 focus:ring-[var(--accent-fg)] text-slate-900 dark:text-slate-100 disabled:opacity-50"
+                  >
+                    <option value="">Sin categoría (Varios)</option>
+                    {categorias.map((cat) => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {categorySavedMsg && (
+                  <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    <span>{categorySavedMsg}</span>
+                  </p>
+                )}
+              </div>
+
               {selectedFactura.nota && (
                 <div className="p-3 bg-slate-50 dark:bg-slate-900/60 rounded-md text-xs text-slate-600 dark:text-slate-300 border border-slate-100 dark:border-slate-800">
                   <span className="font-medium text-slate-700 dark:text-slate-200">Nota:</span> {selectedFactura.nota}
@@ -903,18 +1037,42 @@ export const FacturasView: React.FC = () => {
                 </h4>
                 <div className="border border-slate-200 dark:border-slate-800 rounded-md divide-y divide-slate-100 dark:divide-slate-800">
                   {selectedFactura.items?.map((it) => (
-                    <div key={it.id} className="p-3 flex items-center justify-between text-xs">
-                      <div>
-                        <p className="font-medium text-slate-900 dark:text-slate-100">
+                    <div key={it.id} className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-slate-900 dark:text-slate-100 truncate">
                           {it.producto?.nombre || 'Producto'}
                         </p>
                         <p className="text-slate-400 dark:text-slate-500 text-[11px]">
                           {it.cantidad} {it.producto?.unidad_medida || 'unid.'} × {formatCOP(it.precio_unitario)}
                         </p>
                       </div>
-                      <span className="font-semibold text-slate-900 dark:text-slate-100 font-mono">
-                        {formatCOP(it.subtotal || it.cantidad * it.precio_unitario)}
-                      </span>
+                      <div className="flex items-center justify-between sm:justify-end gap-2.5 shrink-0">
+                        {it.producto?.id && (
+                          <select
+                            aria-label={`Categoría de ${it.producto.nombre}`}
+                            value={it.producto.categoria_id || ''}
+                            disabled={updatingItemProdId === it.producto.id}
+                            onChange={(e) =>
+                              handleChangeItemProductoCategoria(
+                                selectedFactura.id,
+                                it.producto!.id,
+                                e.target.value
+                              )
+                            }
+                            className="text-[11px] px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-[var(--accent-fg)] max-w-[155px] disabled:opacity-50"
+                          >
+                            <option value="">Sin categoría</option>
+                            {categorias.map((cat) => (
+                              <option key={cat.id} value={cat.id}>
+                                {cat.nombre}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                        <span className="font-semibold text-slate-900 dark:text-slate-100 font-mono">
+                          {formatCOP(it.subtotal || it.cantidad * it.precio_unitario)}
+                        </span>
+                      </div>
                     </div>
                   ))}
                 </div>

@@ -816,6 +816,124 @@ export async function createFacturaWithItems(payload: NewInvoicePayload): Promis
   return createdFac;
 }
 
+export async function updateFacturaCategoria(
+  facturaId: string,
+  categoriaId: string | null,
+  applyToUncategorizedProducts: boolean = true
+): Promise<void> {
+  if (isDemoModeActive()) {
+    const fac = localStore.facturas.find((f) => f.id === facturaId);
+    if (fac) {
+      fac.categoria_id = categoriaId || null;
+    }
+    if (applyToUncategorizedProducts && categoriaId) {
+      const productIds = localStore.items_factura
+        .filter((it) => it.factura_id === facturaId)
+        .map((it) => it.producto_id);
+      for (const prod of localStore.productos) {
+        if (productIds.includes(prod.id) && !prod.categoria_id) {
+          prod.categoria_id = categoriaId;
+        }
+      }
+    }
+    saveLocalStore(localStore);
+    return;
+  }
+
+  if (!supabase) throw new Error('Supabase no disponible');
+  await requireAuthenticatedUser();
+
+  const { error } = await supabase
+    .from('facturas')
+    .update({ categoria_id: categoriaId || null })
+    .eq('id', facturaId);
+
+  if (error) throw error;
+
+  if (applyToUncategorizedProducts && categoriaId) {
+    const { data: facItems } = await supabase
+      .from('items_factura')
+      .select('producto_id')
+      .eq('factura_id', facturaId);
+
+    const productIds = Array.from(
+      new Set((facItems || []).map((it: any) => it.producto_id).filter(Boolean))
+    );
+
+    if (productIds.length > 0) {
+      await supabase
+        .from('productos')
+        .update({ categoria_id: categoriaId })
+        .in('id', productIds)
+        .is('categoria_id', null);
+    }
+  }
+}
+
+export async function updateProductoCategoria(
+  productoId: string,
+  categoriaId: string | null
+): Promise<void> {
+  if (isDemoModeActive()) {
+    const prod = localStore.productos.find((p) => p.id === productoId);
+    if (prod) {
+      prod.categoria_id = categoriaId || null;
+    }
+    saveLocalStore(localStore);
+    return;
+  }
+
+  if (!supabase) throw new Error('Supabase no disponible');
+  await requireAuthenticatedUser();
+
+  const { error } = await supabase
+    .from('productos')
+    .update({ categoria_id: categoriaId || null })
+    .eq('id', productoId);
+
+  if (error) throw error;
+}
+
+export async function assignCategoryToFacturaAndItems(
+  facturaId: string,
+  categoriaId: string | null
+): Promise<void> {
+  await updateFacturaCategoria(facturaId, categoriaId, false);
+
+  if (isDemoModeActive()) {
+    const productIds = localStore.items_factura
+      .filter((it) => it.factura_id === facturaId)
+      .map((it) => it.producto_id);
+    for (const prod of localStore.productos) {
+      if (productIds.includes(prod.id)) {
+        prod.categoria_id = categoriaId || null;
+      }
+    }
+    saveLocalStore(localStore);
+    return;
+  }
+
+  if (!supabase) throw new Error('Supabase no disponible');
+  await requireAuthenticatedUser();
+
+  const { data: facItems } = await supabase
+    .from('items_factura')
+    .select('producto_id')
+    .eq('factura_id', facturaId);
+
+  const productIds = Array.from(
+    new Set((facItems || []).map((it: any) => it.producto_id).filter(Boolean))
+  );
+
+  if (productIds.length > 0) {
+    const { error } = await supabase
+      .from('productos')
+      .update({ categoria_id: categoriaId || null })
+      .in('id', productIds);
+    if (error) throw error;
+  }
+}
+
 export async function deleteFactura(id: string): Promise<void> {
   if (isDemoModeActive()) {
     localStore.facturas = localStore.facturas.filter((f) => f.id !== id);

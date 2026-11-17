@@ -1,8 +1,17 @@
 import { AppChangelogEntry } from '../types/database';
 
-export const CURRENT_APP_VERSION = 'v1.12';
+export const CURRENT_APP_VERSION = 'v1.13';
 
 export const APP_CHANGELOG_HISTORY: AppChangelogEntry[] = [
+  {
+    version: 'v1.13',
+    fecha: '2026-11-16',
+    cambios: [
+      'Asignación de categoría después de subir una factura: ahora puedes seleccionar o cambiar la Categoría Principal directamente desde la tabla de Facturas o dentro del modal de Detalle de Factura.',
+      'Edición por ítem en el detalle de factura: posibilidad de asignar categoría individual a cada producto comprado o aplicar la categoría principal de la factura a todos sus ítems con un clic.',
+      'Sincronización automática con las gráficas y filtros del Dashboard y el catálogo de Productos (tanto en Supabase como en Modo Demo).'
+    ]
+  },
   {
     version: 'v1.12',
     fecha: '2026-11-16',
