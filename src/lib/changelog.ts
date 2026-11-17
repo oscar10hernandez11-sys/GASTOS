@@ -1,8 +1,17 @@
 import { AppChangelogEntry } from '../types/database';
 
-export const CURRENT_APP_VERSION = 'v1.14';
+export const CURRENT_APP_VERSION = 'v1.15';
 
 export const APP_CHANGELOG_HISTORY: AppChangelogEntry[] = [
+  {
+    version: 'v1.15',
+    fecha: '2026-11-16',
+    cambios: [
+      'Eliminación de la categoría general en Facturas: ahora la categorización vive exclusivamente en cada producto/ítem para evitar confusiones en compras mixtas (como supermercados o D1).',
+      'Cálculo exacto de fin de mes en el Dashboard: tanto la gráfica de distribución como la comparativa Mes Actual vs. Anterior y los filtros por categoría suman únicamente el valor de los ítems pertenecientes a cada categoría de producto.',
+      'La tabla de Facturas ahora muestra un resumen visual con las categorías de los ítems incluidos en cada compra y permite filtrar facturas con productos pendientes por categorizar.'
+    ]
+  },
   {
     version: 'v1.14',
     fecha: '2026-11-16',

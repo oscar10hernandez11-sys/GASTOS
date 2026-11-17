@@ -364,20 +364,22 @@ export async function updateCategoria(id: string, nombre: string, icono: string,
 }
 
 export async function deleteCategoria(id: string): Promise<{ success: boolean; error?: string }> {
-  // Comprobar productos o facturas asociadas antes de permitir borrar
+  // Comprobar solo productos asociados (las categorías pertenecen a los productos, no a las facturas)
   if (isDemoModeActive()) {
     const hasProducts = localStore.productos.some((p) => p.categoria_id === id);
-    const hasInvoices = localStore.facturas.some((f) => f.categoria_id === id);
 
-    if (hasProducts || hasInvoices) {
+    if (hasProducts) {
       return {
         success: false,
-        error: `No puedes eliminar esta categoría porque está asignada a ${
-          hasProducts ? 'productos existentes' : ''
-        } ${hasProducts && hasInvoices ? 'y' : ''} ${
-          hasInvoices ? 'facturas registradas' : ''
-        }. Reasígnalos primero.`,
+        error: 'No puedes eliminar esta categoría porque está asignada a productos existentes. Reasígnalos primero en Productos y Precios.',
       };
+    }
+
+    // Limpiar cualquier referencia heredada en facturas antiguas
+    for (const fac of localStore.facturas) {
+      if (fac.categoria_id === id) {
+        fac.categoria_id = null;
+      }
     }
 
     localStore.categorias = localStore.categorias.filter((c) => c.id !== id);
@@ -388,18 +390,20 @@ export async function deleteCategoria(id: string): Promise<{ success: boolean; e
   if (!supabase) return { success: false, error: 'Supabase no disponible' };
   await requireAuthenticatedUser();
 
-  // Comprobar relaciones en Supabase
-  const [{ count: prodCount }, { count: facCount }] = await Promise.all([
-    supabase.from('productos').select('*', { count: 'exact', head: true }).eq('categoria_id', id),
-    supabase.from('facturas').select('*', { count: 'exact', head: true }).eq('categoria_id', id),
-  ]);
+  const { count: prodCount } = await supabase
+    .from('productos')
+    .select('*', { count: 'exact', head: true })
+    .eq('categoria_id', id);
 
-  if ((prodCount && prodCount > 0) || (facCount && facCount > 0)) {
+  if (prodCount && prodCount > 0) {
     return {
       success: false,
-      error: `Esta categoría tiene ${(prodCount || 0)} producto(s) y ${(facCount || 0)} factura(s) asociadas. No es posible eliminarla.`,
+      error: `Esta categoría tiene ${prodCount} producto(s) asociado(s). Reasígnalos en Productos y Precios antes de eliminarla.`,
     };
   }
+
+  // Desvincular cualquier factura heredada que tuviera esta categoría antes de borrar
+  await supabase.from('facturas').update({ categoria_id: null }).eq('categoria_id', id);
 
   const { error } = await supabase.from('categorias').delete().eq('id', id);
   if (error) return { success: false, error: error.message };
@@ -716,7 +720,6 @@ export interface NewInvoiceItemPayload {
 export interface NewInvoicePayload {
   fecha: string;
   proveedor: string;
-  categoria_id?: string | null;
   nota?: string | null;
   items: NewInvoiceItemPayload[];
 }
@@ -735,7 +738,7 @@ export async function createFacturaWithItems(payload: NewInvoicePayload): Promis
       user_id: DEMO_USER_ID,
       fecha: payload.fecha,
       proveedor: payload.proveedor.trim(),
-      categoria_id: payload.categoria_id || null,
+      categoria_id: null,
       total: computedTotal,
       nota: payload.nota?.trim() || null,
       created_at: new Date().toISOString(),
@@ -743,11 +746,11 @@ export async function createFacturaWithItems(payload: NewInvoicePayload): Promis
 
     localStore.facturas.unshift(newFac);
 
-    // Procesar cada ítem
+    // Procesar cada ítem con su propia categoría de producto
     for (const itemPayload of payload.items) {
       const prod = await getOrCreateProduct(
         itemPayload.productoNombre,
-        itemPayload.categoriaId || payload.categoria_id || null
+        itemPayload.categoriaId || null
       );
 
       const newItem: ItemFactura = {
@@ -770,14 +773,14 @@ export async function createFacturaWithItems(payload: NewInvoicePayload): Promis
   if (!supabase) throw new Error('Cliente Supabase no disponible');
   await requireAuthenticatedUser();
 
-  // Insertar factura
+  // Insertar factura sin categoría global (las categorías viven en los productos)
   const { data: createdFac, error: facErr } = await supabase
     .from('facturas')
     .insert([
       {
         fecha: payload.fecha,
         proveedor: payload.proveedor.trim(),
-        categoria_id: payload.categoria_id || null,
+        categoria_id: null,
         total: computedTotal,
         nota: payload.nota?.trim() || null,
       },
@@ -792,7 +795,7 @@ export async function createFacturaWithItems(payload: NewInvoicePayload): Promis
   for (const itemPayload of payload.items) {
     const prod = await getOrCreateProduct(
       itemPayload.productoNombre,
-      itemPayload.categoriaId || payload.categoria_id || null
+      itemPayload.categoriaId || null
     );
 
     itemsToInsert.push({
@@ -814,60 +817,6 @@ export async function createFacturaWithItems(payload: NewInvoicePayload): Promis
   }
 
   return createdFac;
-}
-
-export async function updateFacturaCategoria(
-  facturaId: string,
-  categoriaId: string | null,
-  applyToUncategorizedProducts: boolean = true
-): Promise<void> {
-  if (isDemoModeActive()) {
-    const fac = localStore.facturas.find((f) => f.id === facturaId);
-    if (fac) {
-      fac.categoria_id = categoriaId || null;
-    }
-    if (applyToUncategorizedProducts && categoriaId) {
-      const productIds = localStore.items_factura
-        .filter((it) => it.factura_id === facturaId)
-        .map((it) => it.producto_id);
-      for (const prod of localStore.productos) {
-        if (productIds.includes(prod.id) && !prod.categoria_id) {
-          prod.categoria_id = categoriaId;
-        }
-      }
-    }
-    saveLocalStore(localStore);
-    return;
-  }
-
-  if (!supabase) throw new Error('Supabase no disponible');
-  await requireAuthenticatedUser();
-
-  const { error } = await supabase
-    .from('facturas')
-    .update({ categoria_id: categoriaId || null })
-    .eq('id', facturaId);
-
-  if (error) throw error;
-
-  if (applyToUncategorizedProducts && categoriaId) {
-    const { data: facItems } = await supabase
-      .from('items_factura')
-      .select('producto_id')
-      .eq('factura_id', facturaId);
-
-    const productIds = Array.from(
-      new Set((facItems || []).map((it: any) => it.producto_id).filter(Boolean))
-    );
-
-    if (productIds.length > 0) {
-      await supabase
-        .from('productos')
-        .update({ categoria_id: categoriaId })
-        .in('id', productIds)
-        .is('categoria_id', null);
-    }
-  }
 }
 
 export async function updateProductoCategoria(
@@ -892,46 +841,6 @@ export async function updateProductoCategoria(
     .eq('id', productoId);
 
   if (error) throw error;
-}
-
-export async function assignCategoryToFacturaAndItems(
-  facturaId: string,
-  categoriaId: string | null
-): Promise<void> {
-  await updateFacturaCategoria(facturaId, categoriaId, false);
-
-  if (isDemoModeActive()) {
-    const productIds = localStore.items_factura
-      .filter((it) => it.factura_id === facturaId)
-      .map((it) => it.producto_id);
-    for (const prod of localStore.productos) {
-      if (productIds.includes(prod.id)) {
-        prod.categoria_id = categoriaId || null;
-      }
-    }
-    saveLocalStore(localStore);
-    return;
-  }
-
-  if (!supabase) throw new Error('Supabase no disponible');
-  await requireAuthenticatedUser();
-
-  const { data: facItems } = await supabase
-    .from('items_factura')
-    .select('producto_id')
-    .eq('factura_id', facturaId);
-
-  const productIds = Array.from(
-    new Set((facItems || []).map((it: any) => it.producto_id).filter(Boolean))
-  );
-
-  if (productIds.length > 0) {
-    const { error } = await supabase
-      .from('productos')
-      .update({ categoria_id: categoriaId || null })
-      .in('id', productIds);
-    if (error) throw error;
-  }
 }
 
 export async function deleteFactura(id: string): Promise<void> {
@@ -1266,22 +1175,45 @@ export async function getDashboardStats(
   const prevMonthDate = new Date(currentYear, currentMonth - 1, 1);
   const prevYearMonth = `${prevMonthDate.getFullYear()}-${String(prevMonthDate.getMonth() + 1).padStart(2, '0')}`;
 
-  // Filtrar facturas según categoría si se especifica
+  // Helper: monto aportado por una factura según el filtro de categoría por producto
+  const getInvoiceAmountForFilter = (fac: Factura): number => {
+    if (!filterCategoriaId) {
+      return fac.total;
+    }
+    if (!fac.items || fac.items.length === 0) {
+      return 0;
+    }
+    return fac.items.reduce((sum, it) => {
+      const itemCatId = it.categoria?.id || it.producto?.categoria_id || null;
+      if (itemCatId === filterCategoriaId) {
+        return sum + (it.subtotal || it.cantidad * it.precio_unitario);
+      }
+      return sum;
+    }, 0);
+  };
+
+  // Filtrar facturas según categoría de sus ítems/productos si se especifica
   const filteredFacturas = filterCategoriaId
-    ? facturas.filter((f) => {
-        if (f.categoria_id === filterCategoriaId) return true;
-        // O si alguno de sus ítems pertenece a la categoría
-        return f.items?.some((it) => it.categoria?.id === filterCategoriaId || it.producto?.categoria_id === filterCategoriaId);
-      })
+    ? facturas.filter((f) =>
+        f.items?.some(
+          (it) => (it.categoria?.id || it.producto?.categoria_id) === filterCategoriaId
+        )
+      )
     : facturas;
 
   // Total gastado en el mes actual
   const currentMonthFacturas = filteredFacturas.filter((f) => f.fecha.startsWith(curYearMonth));
-  const totalGastadoMes = currentMonthFacturas.reduce((sum, f) => sum + f.total, 0);
+  const totalGastadoMes = currentMonthFacturas.reduce(
+    (sum, f) => sum + getInvoiceAmountForFilter(f),
+    0
+  );
 
   // Total gastado en el mes anterior
   const prevMonthFacturas = filteredFacturas.filter((f) => f.fecha.startsWith(prevYearMonth));
-  const totalGastadoMesAnterior = prevMonthFacturas.reduce((sum, f) => sum + f.total, 0);
+  const totalGastadoMesAnterior = prevMonthFacturas.reduce(
+    (sum, f) => sum + getInvoiceAmountForFilter(f),
+    0
+  );
 
   // Variación %
   let variacionPorcentajeMes = 0;
@@ -1312,20 +1244,20 @@ export async function getDashboardStats(
     .reduce((sum, d) => sum + d.saldo_pendiente, 0);
 
   // 1. GASTO POR CATEGORÍA (Donut Chart)
-  // Calculado a partir de los ítems de las facturas del período
+  // Calculado exclusivamente a partir de la categoría de cada producto/ítem
   const catTotalsMap = new Map<string, number>();
 
   for (const fac of periodFacturas) {
     if (fac.items && fac.items.length > 0) {
       for (const it of fac.items) {
-        const catId = it.categoria?.id || it.producto?.categoria_id || fac.categoria_id || 'otros';
+        const catId = it.categoria?.id || it.producto?.categoria_id || 'sin_categoria';
+        if (filterCategoriaId && catId !== filterCategoriaId) continue;
         const currentSum = catTotalsMap.get(catId) || 0;
         catTotalsMap.set(catId, currentSum + (it.subtotal || it.cantidad * it.precio_unitario));
       }
-    } else {
-      const catId = fac.categoria_id || 'otros';
-      const currentSum = catTotalsMap.get(catId) || 0;
-      catTotalsMap.set(catId, currentSum + fac.total);
+    } else if (!filterCategoriaId) {
+      const currentSum = catTotalsMap.get('sin_categoria') || 0;
+      catTotalsMap.set('sin_categoria', currentSum + fac.total);
     }
   }
 
@@ -1336,9 +1268,9 @@ export async function getDashboardStats(
       const cat = catMap.get(catId);
       return {
         categoriaId: catId,
-        nombre: cat?.nombre || 'Otros y Varios',
+        nombre: cat?.nombre || 'Sin categoría',
         total,
-        color: cat?.color || '#0F4C5C',
+        color: cat?.color || '#94A3B8',
         porcentaje: (total / totalPeriodSpend) * 100,
       };
     })
@@ -1356,7 +1288,7 @@ export async function getDashboardStats(
     const label = `${monthNames[m]} ${String(y).slice(2)}`;
 
     const monthFacs = filteredFacturas.filter((f) => f.fecha.startsWith(ymString));
-    const total = monthFacs.reduce((sum, f) => sum + f.total, 0);
+    const total = monthFacs.reduce((sum, f) => sum + getInvoiceAmountForFilter(f), 0);
 
     evolucion12Meses.push({
       mes: label,
@@ -1365,31 +1297,49 @@ export async function getDashboardStats(
     });
   }
 
-  // 3. COMPARATIVA MES ACTUAL VS MES ANTERIOR POR CATEGORÍA (Bar Chart)
-  const comparativaMap = new Map<string, { actual: number; anterior: number; color: string }>();
+  // 3. COMPARATIVA MES ACTUAL VS MES ANTERIOR POR CATEGORÍA DE PRODUCTO (Bar Chart)
+  const comparativaMap = new Map<string, { nombre: string; actual: number; anterior: number; color: string }>();
 
   // Iniciar con categorías conocidas
   for (const cat of categorias) {
-    comparativaMap.set(cat.nombre, { actual: 0, anterior: 0, color: cat.color });
+    comparativaMap.set(cat.id, { nombre: cat.nombre, actual: 0, anterior: 0, color: cat.color });
   }
 
-  for (const fac of currentMonthFacturas) {
-    const catName = fac.categoria?.nombre || 'Otros y Varios';
-    const entry = comparativaMap.get(catName) || { actual: 0, anterior: 0, color: '#0F4C5C' };
-    entry.actual += fac.total;
-    comparativaMap.set(catName, entry);
-  }
+  const accumulateItemsByMonth = (facs: Factura[], targetField: 'actual' | 'anterior') => {
+    for (const fac of facs) {
+      if (fac.items && fac.items.length > 0) {
+        for (const it of fac.items) {
+          const catId = it.categoria?.id || it.producto?.categoria_id || 'sin_categoria';
+          if (filterCategoriaId && catId !== filterCategoriaId) continue;
+          const cat = catMap.get(catId);
+          const entry = comparativaMap.get(catId) || {
+            nombre: cat?.nombre || 'Sin categoría',
+            actual: 0,
+            anterior: 0,
+            color: cat?.color || '#94A3B8',
+          };
+          entry[targetField] += it.subtotal || it.cantidad * it.precio_unitario;
+          comparativaMap.set(catId, entry);
+        }
+      } else if (!filterCategoriaId) {
+        const entry = comparativaMap.get('sin_categoria') || {
+          nombre: 'Sin categoría',
+          actual: 0,
+          anterior: 0,
+          color: '#94A3B8',
+        };
+        entry[targetField] += fac.total;
+        comparativaMap.set('sin_categoria', entry);
+      }
+    }
+  };
 
-  for (const fac of prevMonthFacturas) {
-    const catName = fac.categoria?.nombre || 'Otros y Varios';
-    const entry = comparativaMap.get(catName) || { actual: 0, anterior: 0, color: '#0F4C5C' };
-    entry.anterior += fac.total;
-    comparativaMap.set(catName, entry);
-  }
+  accumulateItemsByMonth(currentMonthFacturas, 'actual');
+  accumulateItemsByMonth(prevMonthFacturas, 'anterior');
 
-  const comparativaCategorias = Array.from(comparativaMap.entries())
-    .map(([categoria, val]) => ({
-      categoria,
+  const comparativaCategorias = Array.from(comparativaMap.values())
+    .map((val) => ({
+      categoria: val.nombre,
       mesActual: val.actual,
       mesAnterior: val.anterior,
       color: val.color,

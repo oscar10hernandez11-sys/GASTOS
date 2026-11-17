@@ -14,7 +14,6 @@ import {
   updateCategoria,
   deleteCategoria,
   getProductos,
-  getFacturas,
 } from '../../services/dataService';
 import { Categoria } from '../../types/database';
 import {
@@ -29,7 +28,6 @@ export const CategoriasView: React.FC = () => {
   const [categorias, setCategorias] = useState<Categoria[]>([]);
   const [loading, setLoading] = useState(true);
   const [productCounts, setProductCounts] = useState<Record<string, number>>({});
-  const [invoiceCounts, setInvoiceCounts] = useState<Record<string, number>>({});
 
   // Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -46,10 +44,9 @@ export const CategoriasView: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [cats, prods, facs] = await Promise.all([
+      const [cats, prods] = await Promise.all([
         getCategorias(),
         getProductos(),
-        getFacturas(),
       ]);
       setCategorias(cats);
 
@@ -61,15 +58,6 @@ export const CategoriasView: React.FC = () => {
         }
       }
       setProductCounts(pCount);
-
-      // Calcular facturas asociadas
-      const fCount: Record<string, number> = {};
-      for (const f of facs) {
-        if (f.categoria_id) {
-          fCount[f.categoria_id] = (fCount[f.categoria_id] || 0) + 1;
-        }
-      }
-      setInvoiceCounts(fCount);
     } catch (err) {
       console.error(err);
     } finally {
@@ -126,11 +114,10 @@ export const CategoriasView: React.FC = () => {
   const handleDelete = async (cat: Categoria) => {
     setActionError(null);
     const prodCount = productCounts[cat.id] || 0;
-    const facCount = invoiceCounts[cat.id] || 0;
 
-    if (prodCount > 0 || facCount > 0) {
+    if (prodCount > 0) {
       setActionError(
-        `No se puede eliminar la categoría "${cat.nombre}" porque tiene ${prodCount} producto(s) y ${facCount} factura(s) vinculadas. Debes reasignarlos primero para proteger la integridad de tus finanzas.`
+        `No se puede eliminar la categoría "${cat.nombre}" porque tiene ${prodCount} producto(s) vinculado(s). Reasígnalos primero en Productos y Precios para proteger tus análisis.`
       );
       return;
     }
@@ -210,7 +197,6 @@ export const CategoriasView: React.FC = () => {
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
           {categorias.map((cat) => {
             const prodCount = productCounts[cat.id] || 0;
-            const facCount = invoiceCounts[cat.id] || 0;
 
             return (
               <div
@@ -251,7 +237,7 @@ export const CategoriasView: React.FC = () => {
 
                 <div className="mt-4 pt-3 border-t border-slate-100 dark:border-[var(--card-border)] flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 font-mono">
                   <span>{prodCount} producto(s)</span>
-                  <span>{facCount} factura(s)</span>
+                  <span className="text-[10px] font-sans text-slate-400 dark:text-slate-500">Por producto</span>
                 </div>
               </div>
             );
