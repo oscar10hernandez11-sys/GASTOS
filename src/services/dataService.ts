@@ -127,7 +127,7 @@ export async function getCurrentUser(): Promise<UserProfile | null> {
   }
 }
 
-export async function signIn(email: string, password: string): Promise<{ user: UserProfile | null; error: string | null }> {
+export async function signIn(email: string, password: string): Promise<{ user: UserProfile | null; error: string | null; emailNotConfirmed?: boolean }> {
   if (!isSupabaseConfigured || !supabase) {
     return {
       user: null,
@@ -136,7 +136,18 @@ export async function signIn(email: string, password: string): Promise<{ user: U
   }
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error || !data.user) {
-    return { user: null, error: error?.message || 'Credenciales inválidas.' };
+    const msg = error?.message || '';
+    if (/email not confirmed/i.test(msg)) {
+      return {
+        user: null,
+        error: 'Tu correo aún no está confirmado. Revisa tu bandeja de entrada (y spam) o reenvía el enlace de confirmación.',
+        emailNotConfirmed: true,
+      };
+    }
+    if (/invalid login credentials/i.test(msg)) {
+      return { user: null, error: 'Correo o contraseña incorrectos.' };
+    }
+    return { user: null, error: msg || 'Credenciales inválidas.' };
   }
   setDemoModeActive(false);
   clearLegacyBrowserStorage();
@@ -149,6 +160,19 @@ export async function signIn(email: string, password: string): Promise<{ user: U
     },
     error: null,
   };
+}
+
+export async function resendConfirmationEmail(email: string): Promise<{ error: string | null }> {
+  if (!isSupabaseConfigured || !supabase) {
+    return { error: 'Servicio de cuentas no disponible.' };
+  }
+  const redirectTo = typeof window !== 'undefined' ? window.location.origin : undefined;
+  const { error } = await supabase.auth.resend({
+    type: 'signup',
+    email,
+    options: redirectTo ? { emailRedirectTo: redirectTo } : undefined,
+  });
+  return { error: error ? error.message : null };
 }
 
 export async function signUp(email: string, password: string): Promise<{ user: UserProfile | null; error: string | null; confirmationRequired?: boolean }> {

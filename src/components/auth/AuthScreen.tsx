@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Wallet,
   ArrowRight,
@@ -11,7 +11,7 @@ import {
   AlertCircle,
   CheckCircle2,
 } from 'lucide-react';
-import { signIn, signUp, setDemoModeActive } from '../../services/dataService';
+import { signIn, signUp, setDemoModeActive, resendConfirmationEmail } from '../../services/dataService';
 import { isSupabaseConfigured } from '../../lib/supabase';
 import { CURRENT_APP_VERSION } from '../../lib/changelog';
 import { HeaderThemeButton, DarkModeToggleButton } from '../common/ThemeSelector';
@@ -31,11 +31,48 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmationNotice, setConfirmationNotice] = useState(false);
+  const [canResend, setCanResend] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resendInfo, setResendInfo] = useState<string | null>(null);
+
+  // Detecta errores devueltos por Supabase en la URL (p. ej. enlace de confirmación vencido)
+  useEffect(() => {
+    const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : '';
+    const params = new URLSearchParams(hash || window.location.search.slice(1));
+    const errorCode = params.get('error_code') || params.get('error');
+    if (!errorCode) return;
+    if (/otp_expired/i.test(errorCode)) {
+      setError('El enlace de confirmación expiró o ya fue usado. Ingresa tu correo y reenvía uno nuevo, o intenta iniciar sesión.');
+      setCanResend(true);
+    } else {
+      setError(params.get('error_description')?.replace(/\+/g, ' ') || 'No se pudo completar la confirmación del correo.');
+    }
+    window.history.replaceState(null, '', window.location.pathname);
+  }, []);
+
+  const handleResend = async () => {
+    if (!email) {
+      setError('Escribe tu correo electrónico para reenviar el enlace de confirmación.');
+      return;
+    }
+    setResending(true);
+    setResendInfo(null);
+    const res = await resendConfirmationEmail(email);
+    setResending(false);
+    if (res.error) {
+      setError(res.error);
+    } else {
+      setError(null);
+      setResendInfo('Te enviamos un nuevo enlace de confirmación. Revisa tu bandeja de entrada y la carpeta de spam.');
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setConfirmationNotice(false);
+    setCanResend(false);
+    setResendInfo(null);
     setLoading(true);
 
     try {
@@ -45,6 +82,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           setError(res.error);
         } else if (res.confirmationRequired) {
           setConfirmationNotice(true);
+          setCanResend(true);
         } else {
           onSuccess();
         }
@@ -52,6 +90,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         const res = await signIn(email, password);
         if (res.error) {
           setError(res.error);
+          setCanResend(Boolean(res.emailNotConfirmed));
         } else {
           onSuccess();
         }
@@ -202,6 +241,24 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-500" />
                 <span className="leading-snug">{error}</span>
               </div>
+            )}
+
+            {/* Resend confirmation */}
+            {resendInfo && (
+              <div className="mb-4 p-3 rounded-md bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/60 text-emerald-800 dark:text-emerald-200 text-xs flex items-start gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-emerald-600 dark:text-emerald-400" />
+                <span className="leading-snug">{resendInfo}</span>
+              </div>
+            )}
+            {canResend && (
+              <button
+                type="button"
+                onClick={handleResend}
+                disabled={resending}
+                className="mb-4 w-full py-2 px-3 text-xs font-medium rounded-md border border-[var(--accent-border)] text-[var(--accent-fg)] hover:bg-[var(--accent-soft)] transition-colors disabled:opacity-50"
+              >
+                {resending ? 'Reenviando…' : 'Reenviar correo de confirmación'}
+              </button>
             )}
 
             {/* Confirmation notice */}
