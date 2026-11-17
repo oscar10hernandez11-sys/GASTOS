@@ -791,7 +791,7 @@ export const FacturasView: React.FC = () => {
                             <input
                               type="number"
                               min="0"
-                              step="100"
+                              step="any"
                               value={it.precio_unitario || ''}
                               onChange={(e) => handleItemChange(idx, 'precio_unitario', parseFloat(e.target.value) || 0)}
                               placeholder="0"

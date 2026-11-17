@@ -1,8 +1,34 @@
 import { AppChangelogEntry } from '../types/database';
 
-export const CURRENT_APP_VERSION = 'v1.9';
+export const CURRENT_APP_VERSION = 'v1.12';
 
 export const APP_CHANGELOG_HISTORY: AppChangelogEntry[] = [
+  {
+    version: 'v1.12',
+    fecha: '2026-11-16',
+    cambios: [
+      'Integración de flujo completo de confirmación por correo y reenvío: detección de enlaces de verificación caducados o ya usados en la URL con botón "Reenviar correo de confirmación" hacia el dominio activo (window.location.origin).',
+      'Botón de reenvío disponible tanto tras el registro ("Revisa tu correo electrónico") como al intentar iniciar sesión con una cuenta pendiente de confirmación.',
+      'Compatibilidad automática con proyectos de Supabase con confirmación activada o desactivada, conservando los mensajes de error en español ("Correo o contraseña incorrectos").'
+    ]
+  },
+  {
+    version: 'v1.11',
+    fecha: '2026-11-16',
+    cambios: [
+      'Corrección de validación en montos de Deudas y Abonos: la combinación de min="1" y step="1000" hacía que el navegador solo aceptara montos terminados en 001 (como 5499001 o 5500001) y rechazara valores exactos como 5500000; se cambió a step="any" para admitir cualquier valor válido.',
+      'Corrección preventiva en el precio unitario de ítems de Facturas (step="any" en lugar de step="100") para permitir precios exactos no múltiplos de 100.'
+    ]
+  },
+  {
+    version: 'v1.10',
+    fecha: '2026-11-16',
+    cambios: [
+      'Corrección de reinicio al cambiar de pestaña: Supabase emitía el evento SIGNED_IN al recuperar el foco de la ventana y la aplicación activaba la pantalla de carga desmontando las vistas; ahora la sesión se valida en segundo plano sin recargar ni perder el estado ni la pestaña activa.',
+      'Persistencia de la sección activa (Dashboard, Facturas, Productos, Deudas, Categorías o Integración) durante la sesión para evitar volver al inicio si el navegador suspende la pestaña.',
+      'Ajuste en el registro de cuentas para ingreso directo sin exigir confirmación por correo desde la interfaz y mensajes claros en español si el proyecto de Supabase aún tiene activa la verificación por correo o el límite de envío.'
+    ]
+  },
   {
     version: 'v1.9',
     fecha: '2026-11-16',

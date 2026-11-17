@@ -476,7 +476,7 @@ export const DeudasView: React.FC = () => {
                   type="number"
                   required
                   min="1"
-                  step="1000"
+                  step="any"
                   placeholder="Ej. 5000000"
                   value={montoTotal}
                   onChange={(e) => setMontoTotal(parseFloat(e.target.value) || '')}
@@ -517,7 +517,7 @@ export const DeudasView: React.FC = () => {
                 </label>
                 <input
                   type="number"
-                  step="0.01"
+                  step="any"
                   min="0"
                   max="100"
                   placeholder="Ej. 1.8"
@@ -616,7 +616,7 @@ export const DeudasView: React.FC = () => {
                         type="number"
                         required
                         min="1"
-                        step="1000"
+                        step="any"
                         placeholder="Ej. 400000"
                         value={pagoMonto}
                         onChange={(e) => setPagoMonto(parseFloat(e.target.value) || '')}

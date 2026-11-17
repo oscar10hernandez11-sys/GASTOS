@@ -1,17 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Wallet,
   ArrowRight,
   ShieldCheck,
   Zap,
   Sparkles,
-  Database,
   Lock,
   Mail,
   AlertCircle,
   CheckCircle2,
+  RefreshCw,
 } from 'lucide-react';
-import { signIn, signUp, setDemoModeActive } from '../../services/dataService';
+import {
+  signIn,
+  signUp,
+  resendConfirmationEmail,
+  setDemoModeActive,
+} from '../../services/dataService';
 import { isSupabaseConfigured } from '../../lib/supabase';
 import { CURRENT_APP_VERSION } from '../../lib/changelog';
 import { HeaderThemeButton, DarkModeToggleButton } from '../common/ThemeSelector';
@@ -31,11 +36,43 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmationNotice, setConfirmationNotice] = useState(false);
+  const [canResend, setCanResend] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resendFeedback, setResendFeedback] = useState<string | null>(null);
+
+  // Detectar si el usuario llegó desde un enlace de confirmación caducado o ya utilizado
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
+    const queryParams = new URLSearchParams(window.location.search);
+
+    const errCode = hashParams.get('error_code') || queryParams.get('error_code');
+    const errParam = hashParams.get('error') || queryParams.get('error');
+    const errDesc = hashParams.get('error_description') || queryParams.get('error_description') || '';
+
+    if (errCode || errParam) {
+      const lower = `${errCode || ''} ${errDesc}`.toLowerCase();
+      if (lower.includes('otp_expired') || lower.includes('expired') || lower.includes('invalid')) {
+        setError(
+          'El enlace de confirmación caducó o ya fue utilizado. Es posible que tu cuenta ya esté confirmada (intenta iniciar sesión primero) o escribe tu correo abajo para reenviar un enlace nuevo.'
+        );
+      } else {
+        setError(
+          'No se pudo validar el enlace de confirmación. Intenta iniciar sesión o solicita un nuevo enlace de verificación.'
+        );
+      }
+      setCanResend(true);
+      // Limpiar la URL para no repetir el error al recargar
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setConfirmationNotice(false);
+    setCanResend(false);
+    setResendFeedback(null);
     setLoading(true);
 
     try {
@@ -45,6 +82,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           setError(res.error);
         } else if (res.confirmationRequired) {
           setConfirmationNotice(true);
+          setCanResend(true);
         } else {
           onSuccess();
         }
@@ -52,6 +90,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         const res = await signIn(email, password);
         if (res.error) {
           setError(res.error);
+          if (res.emailNotConfirmed) {
+            setCanResend(true);
+          }
         } else {
           onSuccess();
         }
@@ -60,6 +101,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       setError(err?.message || 'Error inesperado al conectar con el servidor.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResendEmail = async () => {
+    setResendFeedback(null);
+    setResending(true);
+    try {
+      const res = await resendConfirmationEmail(email);
+      if (res.error) {
+        setResendFeedback(res.error);
+      } else {
+        setResendFeedback('¡Nuevo correo de confirmación enviado! Revisa tu bandeja de entrada o spam.');
+      }
+    } finally {
+      setResending(false);
     }
   };
 
@@ -158,6 +214,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 onClick={() => {
                   setIsRegister(false);
                   setError(null);
+                  setConfirmationNotice(false);
+                  setCanResend(false);
+                  setResendFeedback(null);
                 }}
                 className={`flex-1 py-1.5 text-xs font-medium rounded transition-colors ${
                   !isRegister
@@ -172,6 +231,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
                 onClick={() => {
                   setIsRegister(true);
                   setError(null);
+                  setConfirmationNotice(false);
+                  setCanResend(false);
+                  setResendFeedback(null);
                 }}
                 className={`flex-1 py-1.5 text-xs font-medium rounded transition-colors ${
                   isRegister
@@ -198,22 +260,53 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
             {/* Error banner */}
             {error && (
-              <div className="mb-4 p-3 rounded-md bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/60 text-rose-700 dark:text-rose-300 text-xs flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-500" />
-                <span className="leading-snug">{error}</span>
+              <div className="mb-4 p-3 rounded-md bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800/60 text-rose-700 dark:text-rose-300 text-xs space-y-2">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5 text-rose-500" />
+                  <span className="leading-snug">{error}</span>
+                </div>
+                {canResend && !confirmationNotice && (
+                  <button
+                    type="button"
+                    disabled={resending}
+                    onClick={handleResendEmail}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-white dark:bg-slate-900 border border-rose-200 dark:border-rose-700 text-rose-700 dark:text-rose-200 hover:bg-rose-100/70 dark:hover:bg-rose-900/40 text-[11px] font-medium transition-colors disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${resending ? 'animate-spin' : ''}`} />
+                    <span>{resending ? 'Enviando...' : 'Reenviar correo de confirmación'}</span>
+                  </button>
+                )}
               </div>
             )}
 
             {/* Confirmation notice */}
             {confirmationNotice && (
-              <div className="mb-4 p-3 rounded-md bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/60 text-emerald-800 dark:text-emerald-200 text-xs flex items-start gap-2">
-                <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-emerald-600 dark:text-emerald-400" />
-                <div>
-                  <p className="font-semibold">Revisa tu correo electrónico</p>
-                  <p className="mt-0.5 text-emerald-700 dark:text-emerald-300">
-                    Te enviamos un enlace de confirmación para activar tu cuenta de Supabase.
-                  </p>
+              <div className="mb-4 p-3 rounded-md bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800/60 text-emerald-800 dark:text-emerald-200 text-xs space-y-2">
+                <div className="flex items-start gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-emerald-600 dark:text-emerald-400" />
+                  <div>
+                    <p className="font-semibold">Revisa tu correo electrónico</p>
+                    <p className="mt-0.5 text-emerald-700 dark:text-emerald-300 leading-snug">
+                      Te enviamos un enlace de confirmación para activar tu cuenta.
+                    </p>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  disabled={resending}
+                  onClick={handleResendEmail}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-700 text-emerald-800 dark:text-emerald-200 hover:bg-emerald-100/60 dark:hover:bg-emerald-900/40 text-[11px] font-medium transition-colors disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-3 h-3 ${resending ? 'animate-spin' : ''}`} />
+                  <span>{resending ? 'Enviando...' : 'Reenviar correo de confirmación'}</span>
+                </button>
+              </div>
+            )}
+
+            {/* Resend feedback */}
+            {resendFeedback && (
+              <div className="mb-4 p-2.5 rounded-md bg-slate-50 dark:bg-slate-900/70 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 text-xs">
+                {resendFeedback}
               </div>
             )}
 

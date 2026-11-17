@@ -127,7 +127,42 @@ export async function getCurrentUser(): Promise<UserProfile | null> {
   }
 }
 
-export async function signIn(email: string, password: string): Promise<{ user: UserProfile | null; error: string | null }> {
+function formatSupabaseAuthError(message?: string): { text: string; isEmailNotConfirmed: boolean } {
+  const msg = (message || '').toLowerCase();
+  if (msg.includes('rate limit') || msg.includes('over_email_send_rate_limit')) {
+    return {
+      text: 'Se superó el límite temporal de envío de correos en Supabase (2 por hora en plan gratuito). Espera unos minutos o desactiva "Confirm email" en Supabase.',
+      isEmailNotConfirmed: false,
+    };
+  }
+  if (msg.includes('email not confirmed')) {
+    return {
+      text: 'Tu correo electrónico aún no ha sido confirmado. Revisa tu bandeja de entrada (o spam) o reenvía el enlace de confirmación.',
+      isEmailNotConfirmed: true,
+    };
+  }
+  if (msg.includes('user already registered')) {
+    return {
+      text: 'Este correo ya está registrado. Cambia a la pestaña "Iniciar sesión" para ingresar.',
+      isEmailNotConfirmed: false,
+    };
+  }
+  if (msg.includes('invalid login credentials')) {
+    return {
+      text: 'Correo o contraseña incorrectos.',
+      isEmailNotConfirmed: false,
+    };
+  }
+  return {
+    text: message || 'No se pudo completar la autenticación.',
+    isEmailNotConfirmed: false,
+  };
+}
+
+export async function signIn(
+  email: string,
+  password: string
+): Promise<{ user: UserProfile | null; error: string | null; emailNotConfirmed?: boolean }> {
   if (!isSupabaseConfigured || !supabase) {
     return {
       user: null,
@@ -136,7 +171,12 @@ export async function signIn(email: string, password: string): Promise<{ user: U
   }
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error || !data.user) {
-    return { user: null, error: error?.message || 'Credenciales inválidas.' };
+    const formatted = formatSupabaseAuthError(error?.message || 'Credenciales inválidas.');
+    return {
+      user: null,
+      error: formatted.text,
+      emailNotConfirmed: formatted.isEmailNotConfirmed,
+    };
   }
   setDemoModeActive(false);
   clearLegacyBrowserStorage();
@@ -151,13 +191,17 @@ export async function signIn(email: string, password: string): Promise<{ user: U
   };
 }
 
-export async function signUp(email: string, password: string): Promise<{ user: UserProfile | null; error: string | null; confirmationRequired?: boolean }> {
+export async function signUp(
+  email: string,
+  password: string
+): Promise<{ user: UserProfile | null; error: string | null; confirmationRequired?: boolean }> {
   if (!isSupabaseConfigured || !supabase) {
     return {
       user: null,
       error: 'Variables de entorno de Supabase pendientes. Configura VITE_SUPABASE_URL y VITE_SUPABASE_ANON_KEY o usa el Modo Demo.',
     };
   }
+
   const redirectTo =
     typeof window !== 'undefined' ? window.location.origin : undefined;
 
@@ -166,13 +210,29 @@ export async function signUp(email: string, password: string): Promise<{ user: U
     password,
     options: redirectTo ? { emailRedirectTo: redirectTo } : undefined,
   });
+
   if (error) {
-    return { user: null, error: error.message };
+    return { user: null, error: formatSupabaseAuthError(error.message).text };
   }
 
   setDemoModeActive(false);
   clearLegacyBrowserStorage();
-  const requiresEmailConfirmation = !data.session;
+
+  // Si Supabase tiene desactivada la confirmación por correo, devuelve sesión inmediata
+  if (data.session?.user) {
+    return {
+      user: {
+        id: data.session.user.id,
+        email: data.session.user.email || email,
+        isDemo: false,
+        isAdmin: checkIsAdmin(data.session.user),
+      },
+      error: null,
+      confirmationRequired: false,
+    };
+  }
+
+  // Si no devolvió sesión, el proyecto exige confirmación de correo electrónico
   return {
     user: data.user
       ? {
@@ -183,8 +243,36 @@ export async function signUp(email: string, password: string): Promise<{ user: U
         }
       : null,
     error: null,
-    confirmationRequired: requiresEmailConfirmation,
+    confirmationRequired: true,
   };
+}
+
+export async function resendConfirmationEmail(
+  email: string
+): Promise<{ error: string | null }> {
+  if (!isSupabaseConfigured || !supabase) {
+    return {
+      error: 'Variables de entorno de Supabase pendientes.',
+    };
+  }
+  const cleanEmail = email.trim();
+  if (!cleanEmail) {
+    return { error: 'Ingresa tu correo electrónico primero para reenviar el enlace.' };
+  }
+
+  const redirectTo =
+    typeof window !== 'undefined' ? window.location.origin : undefined;
+
+  const { error } = await supabase.auth.resend({
+    type: 'signup',
+    email: cleanEmail,
+    options: redirectTo ? { emailRedirectTo: redirectTo } : undefined,
+  });
+
+  if (error) {
+    return { error: formatSupabaseAuthError(error.message).text };
+  }
+  return { error: null };
 }
 
 export async function signOut(): Promise<void> {

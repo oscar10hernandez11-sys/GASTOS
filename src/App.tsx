@@ -24,10 +24,26 @@ import { X } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { ThemeProvider } from './lib/theme';
 
+const TAB_STORAGE_KEY = 'kakebo_active_tab';
+const VALID_TABS: NavTab[] = ['dashboard', 'facturas', 'productos', 'deudas', 'categorias', 'integracion'];
+
+function getInitialTab(): NavTab {
+  if (typeof window === 'undefined') return 'dashboard';
+  try {
+    const saved = window.sessionStorage.getItem(TAB_STORAGE_KEY) as NavTab | null;
+    if (saved && VALID_TABS.includes(saved)) {
+      return saved;
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return 'dashboard';
+}
+
 function AppContent() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [currentTab, setCurrentTab] = useState<NavTab>('dashboard');
+  const [currentTab, setCurrentTab] = useState<NavTab>(getInitialTab);
 
   // Modals
   const [isChangelogOpen, setIsChangelogOpen] = useState(false);
@@ -40,29 +56,64 @@ function AppContent() {
   // Key to force refresh/unmount views cleanly on user switch or logout
   const [refreshKey, setRefreshKey] = useState(0);
 
-  const checkAuth = async () => {
-    setAuthLoading(true);
+  const handleSelectTab = (tab: NavTab) => {
+    setCurrentTab(tab);
+    try {
+      window.sessionStorage.setItem(TAB_STORAGE_KEY, tab);
+    } catch {
+      // ignore storage errors
+    }
+  };
+
+  const syncUserSilently = async (showSpinner = false) => {
+    if (showSpinner) {
+      setAuthLoading(true);
+    }
     try {
       const currentUser = await getCurrentUser();
-      setUser(currentUser);
+      setUser((prev) => {
+        if (!currentUser) return null;
+        if (
+          prev &&
+          prev.id === currentUser.id &&
+          prev.email === currentUser.email &&
+          prev.isDemo === currentUser.isDemo &&
+          prev.isAdmin === currentUser.isAdmin
+        ) {
+          return prev;
+        }
+        return currentUser;
+      });
     } catch {
-      setUser(null);
+      if (showSpinner) {
+        setUser(null);
+      }
     } finally {
-      setAuthLoading(false);
+      if (showSpinner) {
+        setAuthLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    checkAuth();
+    syncUserSilently(true);
 
     if (!supabase) return;
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT') {
         setUser(null);
-        setCurrentTab('dashboard');
+        handleSelectTab('dashboard');
         setRefreshKey((k) => k + 1);
-      } else if (event === 'SIGNED_IN') {
-        checkAuth();
+      } else if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+        // Al volver a la pestaña del navegador, Supabase emite SIGNED_IN para validar la sesión.
+        // Sincronizamos en segundo plano sin activar authLoading para no recargar ni desmontar vistas.
+        setUser((prev) => {
+          if (prev && session?.user && prev.id === session.user.id) {
+            return prev;
+          }
+          void syncUserSilently(false);
+          return prev;
+        });
       }
     });
 
@@ -74,7 +125,12 @@ function AppContent() {
   const handleLogout = async () => {
     await signOut();
     setUser(null);
-    setCurrentTab('dashboard');
+    handleSelectTab('dashboard');
+    try {
+      window.sessionStorage.removeItem(TAB_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
     setIsChangelogOpen(false);
     setIsSqlModalOpen(false);
     setIsConfigModalOpen(false);
@@ -96,7 +152,7 @@ function AppContent() {
     return (
       <>
         <AuthScreen
-          onSuccess={checkAuth}
+          onSuccess={() => syncUserSilently(false)}
           onOpenChangelogModal={() => setIsChangelogOpen(true)}
         />
         <ChangelogModal
@@ -113,7 +169,7 @@ function AppContent() {
       <div className="hidden lg:flex">
         <Sidebar
           currentTab={currentTab}
-          onSelectTab={setCurrentTab}
+          onSelectTab={handleSelectTab}
           user={user}
           onLogout={handleLogout}
           onOpenChangelog={() => setIsChangelogOpen(true)}
@@ -139,7 +195,7 @@ function AppContent() {
               <Sidebar
                 currentTab={currentTab}
                 onSelectTab={(tab) => {
-                  setCurrentTab(tab);
+                  handleSelectTab(tab);
                   setIsMobileMenuOpen(false);
                 }}
                 user={user}
